@@ -27,10 +27,12 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
 > virtual-size pair in the header. Runtime semantics (user-verified in the live game):
 > the **L (luma, low byte) channel drives visibility** on the darkness/blur pass
 > (L=0 → invisible), the **A channel is effectively ignored**; the **UI/menu is drawn
-> from the standalone sprite files, not the atlas**; and the atlas blob IS consumed
-> (whole-sheet edits visually wreck the world), but its path→rect mapping is NOT the
-> `atlas_blur.txt` manifest the packer writes (localized manifest-rect edits were
-> invisible in the game). A byte-exact repack route (
+> from the standalone sprite files, not the atlas**; the atlas blob IS consumed
+> (whole-sheet edits visually wreck the world), and the atlas **manifest
+> `data/texture/atlas/atlas_blur.txt` IS the live path→rect table** (swapping two
+> entries' rects in the text changed the rendered darkness pass; `atlases.txt`, a
+> named boot entry listing the two `.png` atlas resources, is also read at runtime —
+> bogus names render the menu near-white). A byte-exact repack route (
 > `repack_limbo.py --entry <path.d> --in <edited>` → swap `limbo_boot.pkg` → launch)
 > was proven: zeroing the L plane of the menu title sprite removed the LIMBO title.
 
@@ -87,16 +89,23 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
   A=255 ≈ vanilla; every-texel L=255 → title screen pure black.
 - **UI/menu sprites are separate files, read at runtime**: zeroing L across all the
   menu title sprite's mips removed the LIMBO logo from the live main menu; the rest
-  of the menu unchanged. `atlases.txt` lists `data/sprites/...` paths; the exe holds
-  the strings `Loading atlas texture: '%s'`, `sprites/chapters/`, `sprites/text/`
-  and NO `atlas_blur.txt` loader string.
+  of the menu unchanged. The exe holds the strings `Loading atlas texture: '%s'`,
+  `sprites/chapters/`, `sprites/text/`, `Atlases not found`/`Atlas not found [%s]`,
+  `'ATLAS'`, `'BLUR'`, and `atlases.txt` — but no hardcoded `atlas_blur.txt` (the
+  manifest path is derived from the `.png` name at runtime). `atlases.txt` (a named
+  boot pkg entry) is just a 2-line list of `"data/texture/atlas/atlas_blur.png"` /
+  `"data/texture/atlas/atlas_norm.png"` and IS read live: pointing it at bogus
+  names rendered the menu near-white (mean 233 vs vanilla 45).
 - **Boy / characters**: `boy_default` appears 0 times in the boot filelist — the
-  boy exists only inside the atlas manifest (337 entries), yet localized edits at
-  his manifest rects (head_cutoff 548,2345,215,206; the 3046,3884 head entries on
-  rows 1–3) produced NO visible change in the live game. The runtime's real
-  path→rect table for atlas members is so far unidentified (candidates: compiled
-  table in the exe, `.anim`/`.branch` blobs, unnamed pkg entries). Whole-sheet atlas
-  edits DO reach the renderer.
+  boy exists only inside the atlas manifest (337 entries). Live proof that the
+  manifest is the runtime rect source: swapping the `myst` (fog, L mean ≈205) and
+  `boy_default/head_cutoff` (L mean ≈8) rects in `atlas_blur.txt` — texture
+  untouched — moved the rendered darkness pass (menu after swap: mean 58.97 vs
+  vanilla 45.45; region grid shows the change concentrated at the fog/boy band,
+  hot pixels x[619–1696] y[43–827], centroid (1194,452)). Earlier "localized boy
+  rect edits were invisible" was a **black-on-black confound**: the boy's texels are
+  already near-black, so zeroing/whitening his L produced no visible delta — the
+  manifest edits themselves DID land.
 - Scenes / `skeleton.branch` reference sprites by path string plus per-instance
   floats (world size/basis), never by rect: e.g.
   `data/sprites/characters/boy/boy_default/head_cutoff.png` and
@@ -128,12 +137,19 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
 - **42/42 atlas members** decode pixel-identical to their standalone file (Jaccard
   1.0) at sheet width 4096.
 - **Repack identity**: rebuild with zero replacements is byte-identical to input.
-- **Live proof**: with the title L-plane zeroed, two menu screenshots agree (mean
-  14.4 vs vanilla 25.7) and the diff is confined to the title band (x184–828,
-  y116–466, centroid 538,255, max diff 255); the human confirmed the title is gone
-  in-game. Reverted to vanilla afterwards (SHA-verified).
-- Negative (informative): zeroing A on the boy rects / setting white rect → nothing
-  visible; setting the world sheet all-0xFFFF → game becomes a dark blocky mess.
+- **Live proof (standalone/UI)**: with the title L-plane zeroed, two menu screenshots
+  agree (mean 14.4 vs vanilla 25.7) and the diff is confined to the title band
+  (x184–828, y116–466, centroid 538,255, max diff 255); the human confirmed the title
+  is gone in-game. Reverted to vanilla afterwards (SHA-verified).
+- **Live proof (atlas/manifest IS read)**: (1) `atlases.txt` (named boot entry
+  `atlases.txt`, lists `data/texture/atlas/atlas_blur.png` + `atlas_norm.png`) pointed
+  at bogus names → menu renders near-white (mean 233 vs vanilla 45; 84.8% pixels
+  differ >50). (2) Swapping the `myst` and `boy_default/head_cutoff` rows of
+  `atlas_blur.txt` (text only) → darkness pass visibly moved (mean 58.97 vs 45.45;
+  hot region matches the fog/boy band). Both restored to vanilla afterwards.
+- Negative (informative, re-interpreted): "zeroing the boy's manifest rects → nothing
+  visible" was a black-on-black confound (his L is ~8), not evidence the manifest is
+  unused. A8 is still not observed doing anything.
 
 ## Gotchas
 1. **Don't assert the file-start magic for the sprite header**: the wrapper magic
@@ -149,9 +165,13 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
    `Select-String`, `python`.
 4. **zlib `.d` entries**: replace by compressing again (repack tool does it); a
    hand-built replacement must stay byte-compatible (same length is the safe path).
-5. **The atlas manifest .txt is NOT the runtime rect source** — do not trust its
-   rects for live edits; whole-sheet or standalone-file edits are the reliable
-   vectors until the compiled table is found.
+5. **The atlas manifest IS the runtime rect source** — `atlas_blur.txt` /
+   `atlas_norm.txt` rows (`x y w h usedW usedH "path"`, TAB-separated, CRLF) are
+   parsed live. Edit rects in the text to *move* a sprite (as the myst/head swap
+   proved), but to repaint a sprite keep its rect and edit its pixels in the
+   `.pngatlas` plane at `row = W + y*4096 + x`. The boy's texels are near-black, so
+   L-only edits on him are invisible; use the A byte or paint to make changes
+   visible.
 
 ## Assets
 None generated with AI yet; only numpy/PIL test patterns and the L-zero title.
@@ -160,9 +180,11 @@ None generated with AI yet; only numpy/PIL test patterns and the L-zero title.
 Single session; free (local numpy/PIL, no API spend).
 
 ## Open questions
-- Runtime path→rect table for atlas members (boy, world objects): compiled into the
-  exe, or inside `.anim`/`.branch` blobs / unnamed pkg entries? The atlas header
-  has no rect list and no sprite-count.
+- ~~Runtime path→rect table for atlas members~~ — **RESOLVED**: it is the shipped
+  `atlas_blur.txt` / `atlas_norm.txt` text manifests (live-proven above). The exe
+  contains `Loading atlas texture: '%s'` + `atlases.txt`; the `.png` names in
+  `atlases.txt` are resolved to the `<name>.txt` manifest and the
+  `derived/pc/data/texture/atlas/<name>.pngatlas.d` texture.
 - Meaning of the two trailing header u16s across flag variants and of the id
   nibbling (aa/bb patterns); how the atlas's virtual 4064×3984 UV dims are derived
   vs its 4096×5460 storage strip.
