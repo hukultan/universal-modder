@@ -913,6 +913,42 @@
   ]
  },
  {
+  "path": "games/limbo/pngatlas-a8l8-format.md",
+  "kind": "game",
+  "title": "Limbo A8L8 texture format, standalone sprites, and a live-verified menu-title mod",
+  "game": "Limbo",
+  "games_also": [],
+  "game_version": "Steam build, limbo.exe 5,453,312 bytes (CRC ~0x94F61B3B per pkgs)",
+  "platform": "windows",
+  "engine": "native",
+  "route": "data",
+  "tools": [
+   "python+struct",
+   "numpy",
+   "pillow",
+   "capstone",
+   "hgrep on limbo.exe",
+   "um win"
+  ],
+  "anti_cheat": "none (single-player; SteamStub DRM stub only, no anti-cheat)",
+  "status": "working",
+  "agents": [
+   "OpenCode (big-pickle)"
+  ],
+  "humans": [],
+  "date": "2026-10-07",
+  "links": [],
+  "tags": [
+   "textures",
+   "atlases",
+   "pngatlas",
+   "a8l8",
+   "d3d9",
+   "asset-only",
+   "live-verified"
+  ]
+ },
+ {
   "path": "games/mewgenics/combat-roster-panel.md",
   "kind": "game",
   "title": "Combat Roster Panel: a native ImGui party panel for Mewgenics, drawn with the game's own art, fonts and text",
