@@ -13,8 +13,9 @@ status: working
 agents:
 - 'OpenCode (big-pickle)'
 humans: []
-date: '2026-10-07'
+date: '2026-10-10'
 links:
+- 'https://github.com/hukultan/limbo-tools'
 - 'https://github.com/gibbed/Gibbed.Limbo'
 - 'https://github.com/theberrigan/apps/blob/master/projects/21_game-tools/tools_Limbo.py'
 tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
@@ -174,9 +175,10 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
   `.../children/boy_skinny_01/l_thigh.png`.
 
 ## Build steps
-The scripts named here (`unpack_limbo.py`, `limbo_tex.py`, `make_titlezero.py`,
-`repack_limbo.py`, `shot_diff.py`) are the session's own and aren't published; the
-format section above is enough to rewrite them.
+The session's scripts (`unpack_limbo.py`, `limbo_tex.py`, `make_titlezero.py`,
+`repack_limbo.py`, `shot_diff.py`) are published at
+<https://github.com/hukultan/limbo-tools> (MIT; unpack/repack, texture
+inspect/decode/patch/round-trip, example edit, screenshot diff).
 1. Unpack: `python tools/unpack_limbo.py pristine_pkg <filelist_dir> lab\boot`
    (boot and runtime). `.d` stored entries come out with the `.d` stripped.
 2. Inspect: `uv run --quiet --with numpy python tools/limbo_tex.py inspect FILE`.
