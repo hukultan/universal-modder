@@ -184,7 +184,8 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
 ## Build steps
 The session's scripts are published at <https://github.com/hukultan/limbo-tools>
 (MIT): `unpack_limbo.py`, `repack_limbo.py`, `limbo_tex.py` (inspect / extract /
-pack / patch / round-trip), `make_titlezero.py`, `shot_diff.py`.
+pack / patch / round-trip), `limbo_workflow.py` (bulk extract/pack loop),
+`make_titlezero.py`, `shot_diff.py`.
 1. Unpack: `python tools/unpack_limbo.py pristine_pkg <filelist_dir> lab\boot`
    (boot and runtime). `.d` stored entries come out with the `.d` stripped.
 2. Inspect: `uv run --quiet --with numpy python tools/limbo_tex.py inspect FILE`.
@@ -202,6 +203,12 @@ pack / patch / round-trip), `make_titlezero.py`, `shot_diff.py`.
    file byte length is unchanged (safe for the `.d` deflate). A single old path:
    `tools/make_titlezero.py` zeroes the L byte of every texel in every mip of the
    menu title.
+   For editing **many** assets at once, `limbo_workflow.py` wraps the same engine:
+   `extract --boot lab\boot --out assets` dumps every standalone sprite and atlas
+   member to RGBA PNGs (138 + 391) plus a `MANIFEST.json` of each PNG's source
+   texture/rect and SHA-256; `pack --boot ... --assets ... --pkg-in ...
+   --filelists ... --pkg-out ...` rebuilds **only** the PNGs that changed and
+   repacks (untouched pkg entries copied verbatim).
 4. Repack and swap:
    ```
    uv run python tools/repack_limbo.py pristine\Limbo\limbo_boot.pkg ^
@@ -225,6 +232,19 @@ pack / patch / round-trip), `make_titlezero.py`, `shot_diff.py`.
 - **Surgical repack (verified):** editing 2 PNGs (one sprite, one atlas member)
   through the extract/pack loop changed exactly those 2 pkg entries and left the
   other 1,593 byte-identical.
+- **Live proof (multi-asset human-edit loop, user-confirmed in the live game):** the
+  bulk `limbo_workflow.py` loop was driven end to end. `extract` produced 138
+  standalone sprites + 391 atlas members as editable RGBA PNGs; a human repainted
+  three of them — `derived/pc/data/sprites/text/menu/howtoplay_pc.png` (a full
+  2048×1024 menu sprite), plus the `head.png` rects of `characters/sister` and
+  `animation/boy/bones` inside `atlas_blur`. `pack` rebuilt exactly those textures
+  (2 pkg entries changed — the sprite and the shared atlas — the other 1,593
+  byte-identical) into a 20,743,398-byte `limbo_boot.pkg`, verified so the user's
+  red channel became L (byte-exact) and every mip level's change stayed confined to
+  the union of the edited rects. Swapped over the live Steam install (windowed,
+  backed up first), the human confirmed **the edited art renders in-game**. This
+  exercises the whole standalone-sprite path *and* the `patch --mips` atlas path on
+  the real characters. Reverted to vanilla afterwards (SHA-verified).
 - **42/42 atlas members** decode pixel-identical to their standalone file (Jaccard
   1.0) at sheet width 4096 (level 0).
 - **Repack identity**: rebuild with zero replacements is byte-identical to input.
@@ -287,6 +307,11 @@ pack / patch / round-trip), `make_titlezero.py`, `shot_diff.py`.
    the blur pass may sample those. **Fix:** `limbo_tex.py patch ... --rect x,y,w,h
    --mips` writes the downscaled edit into every level (verified confined to the
    scaled rect at all 6 levels of `atlas_blur`).
+6. **Editing channel:** the tools decode L into `R=G=B` of the output PNG, so when
+   packing, the **PNG's R channel becomes L (luminance)** and its **A becomes A**;
+   G/B are ignored. LIMBO renders grayscale, so a coloured edit shows up as its
+   **red channel as gray** — paint in grays (or knowingly accept red-as-gray)
+   rather than expecting the literal RGB colour to survive.
 
 ## Assets
 None generated with AI yet; only numpy/PIL test patterns and the L-zero title.
