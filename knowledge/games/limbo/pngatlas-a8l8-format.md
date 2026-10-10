@@ -30,7 +30,9 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
 > 4096-wide level 0, then five halvings; confirmed by decoding level 1 as a
 > 4096/2=2048-wide image). Runtime semantics (user-verified in the live game):
 > the **L (luma, low byte) channel drives visibility** on the darkness/blur pass
-> (L=0 → invisible), the **A channel is effectively ignored**; the **UI/menu is drawn
+> (L=0 → invisible), the **A channel is read by the pixel shaders** (it becomes the
+> output alpha — see the Shader note below) though a live whole-sheet A=255 atlas edit
+> looked ≈ vanilla; the **UI/menu is drawn
 > from the standalone sprite files, not the atlas**; the atlas blob IS consumed
 > (whole-sheet edits visually wreck the world), and the atlas **manifest
 > `data/texture/atlas/atlas_blur.txt` IS the live path→rect table (the loader reads
@@ -94,8 +96,18 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
   u32 = 7 ; u16 ; u16 W ; u16 H ; u16 usedW ; u16 usedH ; u16 ; u16
   pixel start P = 17 + pathLen + 18 ; texels run to exact EOF
   ```
-  The u16 after the 7 was 0 in the files checked here; theberrigan's script also
-  sees 0x0C0C, 0x3333 and 0xC8C8 there. The first trailing u16 (**high byte = mip
+  `unk6` (the u16 after the 7) is **0 in 139 of 142 containers — every plain sprite
+  (137) and both atlases**; it is nonzero in **exactly the 3 BLUR textures** and only
+  there: `edges/wood.pngblur` = `0x3333`, `props/rope/tile_cable_01.pngblur_a` =
+  `0x0C0C`, `text/menu/uk/c_id#04.pngblur_a` = `0xC8C8` (the exact set theberrigan's
+  script asserts, `unk6 in [0, 3084, 13107, 51400]`). Each value has **high byte ==
+  low byte** (`0x0C/0x33/0xC8`), i.e. a byte duplicated into a u16 — consistent with a
+  normalized 0..1 factor (12/51/200 ÷ 255 ≈ 0.05/0.20/0.78). So it is a **per-texture
+  parameter carried only by BLUR ("black only") textures**, most plausibly a blur
+  strength/opacity authored alongside them. No runtime reader was located (the header
+  is parsed through a vtable-delegated resource decoder), so until proven it is
+  authored metadata the runtime ignores — the loader keys BLUR behaviour off the
+  *name*, not this field. The first trailing u16 (**high byte = mip
   count**, low byte = 2): title `0x0C02` (W=2048 → 12 mips), chapters/1 `0x0B02`
   (W=1024 → 11), metal_heavy 512-wide `0x0A02` (→ 10), atlases `0x0602` (6). The
   second trailing u16 is `0x0A01` for sprites / `0x0A11` for atlases — its low nibble
@@ -130,10 +142,20 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
   - The member check below decodes level 0 at width 4096, which holds either way.
   - **Gotcha consequence:** editing level 0 alone leaves levels 1-5 holding old art
     (see Gotcha 5).
-- **Channel semantics (live, user-confirmed)**: A is effectively unused by the
-  shader/loader; L drives a darkness/luminance pass. Whole-sheet edits prove the
-  atlas is sampled (every texel 0xFFFF → "blocky-blobby, mostly black"); every-texel
-  A=255 ≈ vanilla; every-texel L=255 → title screen pure black.
+- **Channel semantics (live + shader)**: L drives a darkness/luminance pass.
+  Whole-sheet edits prove the atlas is sampled (every texel 0xFFFF →
+  "blocky-blobby, mostly black"); every-texel A=255 ≈ vanilla; every-texel L=255 →
+  title screen pure black. **But A is not dead**: the shipped pixel shaders read the
+  alpha channel into the output alpha — `renderobject.fx` `pixel.xw =
+  tex2Dbias(TextureSampler, uv0).xw * diffuse.xy;` then `pixel = float4(pixel.r,
+  pixel.r * diffuse.a, 0, pixel.a);` (output.A = texel.A · diffuse.y); the fixed-
+  function shaders `color.a *= texel.a;` (`FixedFunction3DColor[Specular]UVPS`),
+  `return float4(16.0/255.0, 0, 0, texel.a);` (`FixedFunctionOverDrawPS`), and
+  `float alpha = texel.a * textureFactor.a;` (`FixedFunction3DNUVPS`); `watereffect.ps`
+  `alpha = tex.a;`. So A is *used* by render paths (it feeds the alpha blend); the
+  earlier "A effectively ignored" was an over-generalization from one whole-sheet
+  A=255 test, whose pass simply didn't show it. Alpha is real; don't discard it when
+  editing (see Gotcha 6).
 - **UI/menu sprites are separate files, read at runtime**: zeroing L across all the
   menu title sprite's mips removed the LIMBO logo from the live main menu; the rest
   of the menu unchanged. The exe holds the strings `Loading atlas texture: '%s'`,
@@ -151,7 +173,10 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
   `FUN_00737470`; ints land at `rect+0x1c..0x30` from `FUN_004e1eb0`), logs
   `Loading atlas texture: '%s'`, and resolves the texture via `FUN_004e40c0(name,
   "ATLAS")` → cache lookup or `FUN_004e3160` (ctor), which sets a flag word to 0x11
-  for `"ATLAS"` / bit3 for `"BLUR"` (substring scan `FUN_00735020`); a suffix selector
+  (bits 0+4) when the name/token contains `"ATLAS"` (`DAT_007cc564`) and ORs bit3 (8)
+  when it contains `"BLUR"` (`DAT_007cc56c`) — a substring scan via `FUN_00735020`.
+  So the exe's flags map exactly onto the on-disk third u32: 1 = plain, 9 = `1|8`
+  (black-only/blur), 17 = `1|16` (`0x11`, b/w atlas); a suffix selector
   (`FUN_005ea9b0`) then picks `_A` / `BLUR_A` / `""` from bits of that flag word. The
   generic texture loader `FUN_004d6fd0` checks "Atlas not found [%s]", rejects size 0,
   and treats the `'XXXX'` (0x58585858) sentinel as invalid — the root reason a rect
@@ -327,11 +352,20 @@ Single session; free (local numpy/PIL, no API spend).
   `derived/pc/data/texture/atlas/<name>.pngatlas.d` texture.
 - ~~Are the atlases mip chains?~~ — **RESOLVED**: yes, 6-level chains (level-1 decodes
   as a 2×2-box half-size copy; corr 0.999). atlas_norm header W/H = 4096×1024.
-- ~~Tail u16s / id-like bytes in the 16-byte prefix~~ — **resolved here**: flags live
+- ~~Tail u16s / id-like bytes in the 16-byte prefix~~ — **resolved earlier**: flags live
   in the third prefix u32 (1/9/17); first tail u16 high byte is a mip count (12/11/10
-  sprites, 6 atlases); the 4th prefix u32 is authoring cruft, not a path CRC. The
-  low-byte meanings of the internal header's second u16 (the `0x0C0C/0x3333/0xC8C8`
-  variants seen by theberrigan) are still unknown.
+  sprites, 6 atlases); the 4th prefix u32 is authoring cruft, not a path CRC.
+- ~~Low-byte meaning of the internal header's second u16 (`unk6`: `0x0C0C/0x3333/0xC8C8`)~~ —
+  **partly resolved here**: `unk6` is nonzero in **only the 3 BLUR ("black only")
+  textures** and is 0 in all 137 plain sprites + 2 atlases; each value is a **byte
+  duplicated into a u16** (`0x0C/0x33/0xC8`) → a plausible normalized 0..1 blur/black
+  parameter. Whether the runtime *reads* it is still unconfirmed (no reader found; the
+  header is parsed via a vtable-delegated resource decoder). Best guess: authored blur
+  metadata the runtime ignores.
+- ~~Whether the A (alpha) channel is used by any render path~~ — **RESOLVED**: yes. The
+  pixel shaders read alpha into the output alpha (`renderobject.fx` output.A = texel.A;
+  `fixedfunction.fx` `color.a *= texel.a` / `texel.a * textureFactor.a` / OverDrawPS
+  returns `texel.a`; `watereffect.ps` `alpha = tex.a`). See the Channel-semantics bullet.
 - ~~Does the boy have standalone sprite files?~~ — **RESOLVED**: no. CRC32 of all
   `data/sprites/characters/boy/**` combos is absent from both pkg hash tables; the
   boy exists only as atlas manifest rects (337 entries).
@@ -339,4 +373,5 @@ Single session; free (local numpy/PIL, no API spend).
   the 11 members that also exist standalone (cols 3-4 equal standalone usedW/usedH, so
   cols 5-6 are the anchor).
 - ~~Steam build ID~~ — **RESOLVED**: 18220724.
-- Whether the A (alpha) channel is used by any render path (fog particles?) at all.
+- Any *fog-particle-specific* alpha use: the shaders that read `texel.a` are the
+  object/fixed-function/water ones; no particle shader was singled out.
