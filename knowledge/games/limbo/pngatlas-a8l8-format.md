@@ -109,6 +109,13 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
   pixel bytes = 2 × (W*H + (W/2)*(H/2) + … + 2*1). Title: 2048×1024 chain =
   2,796,202 texels = 5,592,404 bytes = file−(P) exactly. chapters/1: 1024×512
   chain = 699,050 texels = 1,398,100 bytes = exactly.
+- **W/H ARE stored in the header** (at `se+6`/`se+8`, for sprites and atlases
+  alike), so dimensions need no guessing; and the mip levels are **2×2 floor
+  averages of the L and A bytes taken independently** (a PIL/BOXCAR resize gives
+  ~46% mismatched mip bytes; the integer floor average gives 0). Re-encoding a
+  decoded level 0 and regenerating the chain by that rule reproduces the shipped
+  file byte-exact on **140/140 standalone sprites** — so editing level 0 and
+  regenerating mips is a lossless no-op when nothing is changed.
 - **Atlas blob = 6-level mip chain, CONFIRMED by decoding level 1**:
   - `atlas_blur.pngatlas`: header W=4096 H=4096 usedW=4064 usedH=3984; texel data =
     22,364,160 texels = 4096² + 2048² + 1024² + 512² + 256² + 128² exactly. Reading
@@ -175,16 +182,26 @@ tags: [textures, atlases, pngatlas, a8l8, d3d9, asset-only, live-verified]
   `.../children/boy_skinny_01/l_thigh.png`.
 
 ## Build steps
-The session's scripts (`unpack_limbo.py`, `limbo_tex.py`, `make_titlezero.py`,
-`repack_limbo.py`, `shot_diff.py`) are published at
-<https://github.com/hukultan/limbo-tools> (MIT; unpack/repack, texture
-inspect/decode/patch/round-trip, example edit, screenshot diff).
+The session's scripts are published at <https://github.com/hukultan/limbo-tools>
+(MIT): `unpack_limbo.py`, `repack_limbo.py`, `limbo_tex.py` (inspect / extract /
+pack / patch / round-trip), `make_titlezero.py`, `shot_diff.py`.
 1. Unpack: `python tools/unpack_limbo.py pristine_pkg <filelist_dir> lab\boot`
    (boot and runtime). `.d` stored entries come out with the `.d` stripped.
 2. Inspect: `uv run --quiet --with numpy python tools/limbo_tex.py inspect FILE`.
-3. Edit a standalone sprite in place (SAME byte length so the .d deflate stays
-   valid): e.g. `tools/make_titlezero.py` zeroes the L byte of every texel in every
-   mip of the menu title and writes `lab\renders\limbo_title_zero.png`.
+3. Hand-editing loop (decode → edit → encode → repack):
+   ```
+   # dump every sprite + atlas member to clean RGBA PNGs (L as gray, A as alpha)
+   python tools/limbo_tex.py extract SPRITE.png --out edit.png            # dims from header
+   python tools/limbo_tex.py extract ATLAS.pngatlas --rect 804,2345,215,206 --out head.png
+   # ... human edits edit.png / head.png in any image editor ...
+   python tools/limbo_tex.py pack  SPRITE.png  --out NEW --in edit.png     # rebuild + full mip chain
+   python tools/limbo_tex.py patch ATLAS.pngatlas --out NEW --in head.png \
+       --rect 804,2345,215,206 --mips                                       # edit rect in all 6 mips
+   ```
+   `pack`/`patch` keep the header verbatim and regenerate every mip level, so the
+   file byte length is unchanged (safe for the `.d` deflate). A single old path:
+   `tools/make_titlezero.py` zeroes the L byte of every texel in every mip of the
+   menu title.
 4. Repack and swap:
    ```
    uv run python tools/repack_limbo.py pristine\Limbo\limbo_boot.pkg ^
@@ -193,6 +210,7 @@ inspect/decode/patch/round-trip, example edit, screenshot diff).
        --entry "derived/pc/data/sprites/text/menu/limbo title.png.d" --in NEWFILE
    Copy-Item lab\renders\limbo_boot_TAG.pkg "<install>\limbo_boot.pkg" -Force
    ```
+   (Entry names are the boot-relative path + `.d`; a texture entry is deflated.)
 5. Kill any running game by exact PID (`um win kill PID`), launch via Steam,
    screenshot (`um win shot out.png --exe limbo`), diff vs a vanilla capture with
    `tools/shot_diff.py` / numpy, verify with the human.
@@ -201,6 +219,12 @@ inspect/decode/patch/round-trip, example edit, screenshot diff).
 
 ## Verification
 - **Byte-exact round trip: 140/140 sprite files** parse → re-emit → identical SHA.
+- **Extract→pack identity: 140/140 standalone sprites.** Decode level 0 to RGBA,
+  re-encode, regenerate the mip chain by integer floor averaging → byte-identical
+  to the shipped file. So the edit round trip is lossless when nothing changes.
+- **Surgical repack (verified):** editing 2 PNGs (one sprite, one atlas member)
+  through the extract/pack loop changed exactly those 2 pkg entries and left the
+  other 1,593 byte-identical.
 - **42/42 atlas members** decode pixel-identical to their standalone file (Jaccard
   1.0) at sheet width 4096 (level 0).
 - **Repack identity**: rebuild with zero replacements is byte-identical to input.
@@ -260,9 +284,9 @@ inspect/decode/patch/round-trip, example edit, screenshot diff).
    pixel edit to an atlas member doesn't show, or shows only at some sizes. **Cause:**
    the atlases are 6-level mip chains (verified by decoding level 1), so editing level
    0 alone leaves levels 1-5 holding the old art, and a sprite drawn small or through
-   the blur pass may sample those. **Fix:** write the edit into every level (downscale
-   the edited level-0 region by 2 per level), as the menu title edit did for all of
-   its mips.
+   the blur pass may sample those. **Fix:** `limbo_tex.py patch ... --rect x,y,w,h
+   --mips` writes the downscaled edit into every level (verified confined to the
+   scaled rect at all 6 levels of `atlas_blur`).
 
 ## Assets
 None generated with AI yet; only numpy/PIL test patterns and the L-zero title.
